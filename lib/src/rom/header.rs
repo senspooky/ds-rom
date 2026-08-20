@@ -59,6 +59,17 @@ pub struct HeaderOriginal {
     pub rw_nand_end: u16,
     /// Whether the header has the ARM9 build info offset.
     pub has_arm9_build_info_offset: bool,
+    /// Whether the ARM9 build info offset in the header is relative to the start of the ARM9 program instead of the start of
+    /// the ROM. Seen in DSi titles.
+    #[serde(default)]
+    pub arm9_build_info_offset_is_relative: bool,
+    /// Whether the header has the ARM7 build info offset.
+    #[serde(default)]
+    pub has_arm7_build_info_offset: bool,
+    /// Whether the ARM7 build info offset in the header is relative to the start of the ARM7 program instead of the start of
+    /// the ROM. Seen in DSi titles.
+    #[serde(default)]
+    pub arm7_build_info_offset_is_relative: bool,
 }
 
 /// Values for DS games after DSi release, [`HeaderVersion::DsPostDsi`].
@@ -74,6 +85,16 @@ pub struct HeaderDsPostDsi {
     pub sha1_hmac_unk2: [u8; 0x14],
     /// RSA-SHA1 signature up to [`raw::Header::debug_args`].
     pub rsa_sha1: Box<[u8]>,
+}
+
+/// Returns the build info offset to put in the ROM header, which is either absolute or relative to the start of the program
+/// depending on how the game stores it.
+fn build_info_offset(present: bool, relative: bool, offset: Option<u32>, program_offset: u32) -> u32 {
+    match offset {
+        Some(offset) if present && relative => offset,
+        Some(offset) if present => offset + program_offset,
+        _ => 0,
+    }
 }
 
 /// Errors related to [`Header::build`].
@@ -107,6 +128,11 @@ impl Header {
                 rom_nand_end: header.rom_nand_end,
                 rw_nand_end: header.rw_nand_end,
                 has_arm9_build_info_offset: header.arm9_build_info_offset != 0,
+                arm9_build_info_offset_is_relative: header.arm9_build_info_offset != 0
+                    && header.arm9_build_info_offset <= header.arm9.offset,
+                has_arm7_build_info_offset: header.arm7_build_info_offset != 0,
+                arm7_build_info_offset_is_relative: header.arm7_build_info_offset != 0
+                    && header.arm7_build_info_offset <= header.arm7.offset,
             },
             ds_post_dsi: (version >= HeaderVersion::DsPostDsi).then_some(HeaderDsPostDsi {
                 dsi_flags_2: header.dsi_flags_2,
@@ -175,12 +201,18 @@ impl Header {
             secure_area_disable: 0,
             rom_size_ds: context.rom_size.expect("ROM size must be known"),
             header_size: size_of::<raw::Header>() as u32,
-            arm9_build_info_offset: if self.original.has_arm9_build_info_offset {
-                context.arm9_build_info_offset.map(|offset| offset + arm9_offset).unwrap_or(0)
-            } else {
-                0
-            },
-            arm7_build_info_offset: context.arm7_build_info_offset.map(|offset| offset + arm7_offset).unwrap_or(0),
+            arm9_build_info_offset: build_info_offset(
+                self.original.has_arm9_build_info_offset,
+                self.original.arm9_build_info_offset_is_relative,
+                context.arm9_build_info_offset,
+                arm9_offset,
+            ),
+            arm7_build_info_offset: build_info_offset(
+                self.original.has_arm7_build_info_offset,
+                self.original.arm7_build_info_offset_is_relative,
+                context.arm7_build_info_offset,
+                arm7_offset,
+            ),
             ds_rom_region_end: 0,
             dsi_rom_region_end: 0,
             rom_nand_end: self.original.rom_nand_end,
