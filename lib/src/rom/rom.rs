@@ -314,6 +314,10 @@ pub enum RomSaveError {
     },
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Config file for the ARM9 main module.
 #[derive(Serialize, Deserialize)]
 pub struct Arm9BuildConfig {
@@ -324,6 +328,9 @@ pub struct Arm9BuildConfig {
     pub encrypted: bool,
     /// Whether this module is compressed in the ROM.
     pub compressed: bool,
+    /// Whether this module is followed by an ARM9 footer in the ROM. Defaults to `true`, since ROMs without a footer are rare.
+    #[serde(default = "default_true")]
+    pub footer: bool,
     /// Build info for this module.
     #[serde(flatten)]
     pub build_info: BuildInfo,
@@ -429,6 +436,7 @@ impl<'a> Rom<'a> {
             originally_encrypted: arm9_build_config.encrypted,
             dsprot_state: arm9_build_config.dsprot_state,
         })?;
+        arm9.set_has_footer(arm9_build_config.footer);
         arm9_build_config.build_info.assign_to_raw(arm9.build_info_mut()?);
         arm9.update_overlay_signatures(&arm9_overlays)?;
         if arm9.dsprot_state().is_unencrypted() && options.encrypt {
@@ -602,6 +610,7 @@ impl<'a> Rom<'a> {
             offsets: *self.arm9.offsets(),
             encrypted: self.arm9.is_encrypted(),
             compressed: self.arm9.is_compressed()?,
+            footer: self.arm9.has_footer(),
             build_info: (*self.arm9.build_info()?).into(),
             dsprot_state: plain_arm9.dsprot_state().clone(),
         };
@@ -858,8 +867,10 @@ impl<'a> Rom<'a> {
         context.arm9_autoload_callback = Some(self.arm9.autoload_callback());
         context.arm9_build_info_offset = Some(self.arm9.build_info_offset());
         cursor.write_all(self.arm9.full_data())?;
-        let footer = Arm9Footer::new(self.arm9.build_info_offset(), self.arm9.overlay_signatures_offset());
-        cursor.write_all(bytemuck::bytes_of(&footer))?;
+        if self.arm9.has_footer() {
+            let footer = Arm9Footer::new(self.arm9.build_info_offset(), self.arm9.overlay_signatures_offset());
+            cursor.write_all(bytemuck::bytes_of(&footer))?;
+        }
 
         let max_file_id = self.files.max_file_id();
         let mut file_allocs = vec![FileAlloc::default(); max_file_id as usize + 1];
@@ -889,7 +900,7 @@ impl<'a> Rom<'a> {
         self.align(&mut cursor, self.config.alignment.arm7, self.config.padding.arm7)?;
         context.arm7_offset = Some(cursor.position() as u32);
         context.arm7_autoload_callback = Some(self.arm7.autoload_callback());
-        context.arm7_build_info_offset = None;
+        context.arm7_build_info_offset = Some(self.arm7.build_info_offset());
         cursor.write_all(self.arm7.full_data())?;
 
         if !self.arm7_overlay_table.is_empty() {
