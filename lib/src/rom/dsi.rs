@@ -18,8 +18,16 @@ pub struct DsiProgramOffsets {
     pub modcrypt_size: u32,
 }
 
-/// A DSi-exclusive program, either ARM9i or ARM7i. These are plain blobs in the ROM with no footer, autoloads or
-/// compression, but the start of the program may be [Modcrypted](Modcrypt).
+/// A DSi-exclusive program, either ARM9i or ARM7i. It is stored here as the plain blob the ROM
+/// holds, with no footer or autoloads parsed, but the start of the program may be
+/// [Modcrypted](Modcrypt).
+///
+/// The blob is not necessarily uncompressed. Pokemon Black 2's ARM9i is BLZ-compressed: 0x21c40
+/// bytes decompressing to 0x6aef0, and it runs at 0x02700000 rather than the 0x02400000 the header
+/// loads it at. Its decompressed image ends in a 16-byte autoload info entry, base 0x02700000 and
+/// size 0x6aee0, at exactly the address base plus size names. Note that the decompressed length is
+/// `blob_len - 4 + inc_len` and not the `dec_len + comp_len + inc_len` the usual BLZ formula gives,
+/// which is 6 bytes short and misplaces every byte the backward pass writes.
 ///
 /// The data is held *decrypted*, which is the form that the digest tables and the program's own SHA1-HMAC cover.
 #[derive(Clone)]
