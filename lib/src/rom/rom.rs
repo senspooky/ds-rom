@@ -209,6 +209,14 @@ pub enum RomExtractError {
         /// Backtrace to the source of the error.
         backtrace: Backtrace,
     },
+    /// Occurs when a DSi ROM is Modcrypted with the debug key. The debug key scheme is not supported, and leaving the
+    /// programs encrypted would produce an extraction that cannot be rebuilt to match the original, so extraction is
+    /// rejected instead.
+    #[snafu(display("DSi ROM is Modcrypted with the debug key, which is not supported:\n{backtrace}"))]
+    ModcryptDebugKeyUnsupported {
+        /// Backtrace to the source of the error.
+        backtrace: Backtrace,
+    },
     /// See [`RomAlignmentsError`].
     #[snafu(transparent)]
     RomAlignments {
@@ -1064,11 +1072,11 @@ impl<'a> Rom<'a> {
 
         let modcrypt = if header.dsi_flags.modcrypted() {
             if header.dsi_flags.modcrypt_debug_key() {
-                log::warn!("ROM is Modcrypted with the debug key, which is not supported; DSi programs stay encrypted");
-                None
-            } else {
-                Some(Modcrypt::retail(header.gamecode.0, &header.sha1_hmac_arm9i))
+                // The debug key scheme is unsupported. Leaving the programs encrypted would produce a decrypted digest form
+                // over ciphertext on rebuild, silently mismatching the original, so reject the extraction outright.
+                return ModcryptDebugKeyUnsupportedSnafu {}.fail();
             }
+            Some(Modcrypt::retail(header.gamecode.0, &header.sha1_hmac_arm9i))
         } else {
             None
         };
