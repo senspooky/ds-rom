@@ -37,10 +37,9 @@ fn digest_form(rom: &[u8], key: &BlowfishKey) -> Result<Vec<u8>> {
 
     if header.dsi_flags.modcrypted() {
         let modcrypt = Modcrypt::retail(header.gamecode.0, &header.sha1_hmac_arm9i);
-        for (area, counter) in [
-            (header.modcrypt_area_1, header.sha1_hmac_arm9_with_secure_area),
-            (header.modcrypt_area_2, header.sha1_hmac_arm7),
-        ] {
+        for (area, counter) in
+            [(header.modcrypt_area_1, header.sha1_hmac_arm9_with_secure_area), (header.modcrypt_area_2, header.sha1_hmac_arm7)]
+        {
             if area.size == 0 {
                 continue;
             }
@@ -115,10 +114,7 @@ fn assert_self_consistent(rom: &[u8], key: &BlowfishKey, label: &str) -> Result<
         "{label}: digest block hashtable"
     );
     assert_eq!(header.sha1_hmac_digest, hashes.digest_master, "{label}: digest master hash");
-    assert_eq!(
-        header.sha1_hmac_arm9_with_secure_area, hashes.arm9_with_secure_area,
-        "{label}: ARM9 hash with secure area"
-    );
+    assert_eq!(header.sha1_hmac_arm9_with_secure_area, hashes.arm9_with_secure_area, "{label}: ARM9 hash with secure area");
     assert_eq!(header.sha1_hmac_arm9, hashes.arm9, "{label}: ARM9 hash");
     assert_eq!(header.sha1_hmac_arm7, hashes.arm7, "{label}: ARM7 hash");
     assert_eq!(header.sha1_hmac_banner, hashes.banner, "{label}: banner hash");
