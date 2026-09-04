@@ -40,7 +40,11 @@ const DSI_REGION_UNIT: u32 = 0x80000;
 /// Guesses the alignment a section was built with from its offset. Used for the DSi area, whose sections are laid out more
 /// coarsely than the DS area.
 fn detect_alignment(offset: u32) -> u32 {
-    if offset == 0 { 4 } else { 1 << offset.trailing_zeros().clamp(2, 12) }
+    if offset == 0 {
+        4
+    } else {
+        1 << offset.trailing_zeros().clamp(2, 12)
+    }
 }
 
 /// Rounds `value` up to the next multiple of `alignment`, which must be a power of two.
@@ -810,15 +814,9 @@ impl<'a> Rom<'a> {
         match (&self.dsi, &self.config.dsi) {
             (Some(dsi), Some(config)) => {
                 create_file_and_dirs(path.join(&config.arm9i_bin))?.write_all(dsi.arm9i.full_data())?;
-                serde_saphyr::to_io_writer(
-                    &mut create_file_and_dirs(path.join(&config.arm9i_config))?,
-                    dsi.arm9i.offsets(),
-                )?;
+                serde_saphyr::to_io_writer(&mut create_file_and_dirs(path.join(&config.arm9i_config))?, dsi.arm9i.offsets())?;
                 create_file_and_dirs(path.join(&config.arm7i_bin))?.write_all(dsi.arm7i.full_data())?;
-                serde_saphyr::to_io_writer(
-                    &mut create_file_and_dirs(path.join(&config.arm7i_config))?,
-                    dsi.arm7i.offsets(),
-                )?;
+                serde_saphyr::to_io_writer(&mut create_file_and_dirs(path.join(&config.arm7i_config))?, dsi.arm7i.offsets())?;
                 create_file_and_dirs(path.join(&config.region_padding))?.write_all(&dsi.region_padding)?;
             }
             (None, Some(_)) => log::warn!("DSi area not found, but config requested it to be saved"),
@@ -1005,10 +1003,7 @@ impl<'a> Rom<'a> {
 
     /// Extracts the DSi area of a DSi-enhanced or DSi-exclusive ROM, decrypting the Modcrypt areas of the DSi-exclusive
     /// programs so that they can be modified and re-encrypted on the way back out.
-    fn extract_dsi_area(
-        rom: &'a raw::Rom,
-        header: &raw::Header,
-    ) -> Result<(DsiArea<'a>, RomConfigDsi), RomExtractError> {
+    fn extract_dsi_area(rom: &'a raw::Rom, header: &raw::Header) -> Result<(DsiArea<'a>, RomConfigDsi), RomExtractError> {
         let data = rom.data();
 
         // The DSi header fields are only trustworthy if they actually point into the ROM.
@@ -1313,7 +1308,9 @@ impl<'a> Rom<'a> {
                 };
             }
             let needed = rom_size_ds.div_ceil(DSI_REGION_UNIT) as u16;
-            log::warn!("DS area no longer fits below the DSi area, moving the region end from {ds_rom_region_end:#x} to {needed:#x}");
+            log::warn!(
+                "DS area no longer fits below the DSi area, moving the region end from {ds_rom_region_end:#x} to {needed:#x}"
+            );
             ds_rom_region_end = needed;
         };
 
@@ -1423,22 +1420,10 @@ impl<'a> Rom<'a> {
             arm7i_build_info_offset: dsi.arm7i.offsets().build_info_offset,
             modcrypt_area_1,
             modcrypt_area_2,
-            digest_ds_area: TableOffset {
-                offset: ntr_region_start,
-                size: sector_hashtable_offset - ntr_region_start,
-            },
-            digest_dsi_area: TableOffset {
-                offset: layout.arm9i_offset,
-                size: layout.rom_size_dsi - layout.arm9i_offset,
-            },
-            digest_sector_hashtable: TableOffset {
-                offset: sector_hashtable_offset,
-                size: layout.sector_hashtable_size,
-            },
-            digest_block_hashtable: TableOffset {
-                offset: layout.block_hashtable_offset,
-                size: layout.block_hashtable_size,
-            },
+            digest_ds_area: TableOffset { offset: ntr_region_start, size: sector_hashtable_offset - ntr_region_start },
+            digest_dsi_area: TableOffset { offset: layout.arm9i_offset, size: layout.rom_size_dsi - layout.arm9i_offset },
+            digest_sector_hashtable: TableOffset { offset: sector_hashtable_offset, size: layout.sector_hashtable_size },
+            digest_block_hashtable: TableOffset { offset: layout.block_hashtable_offset, size: layout.block_hashtable_size },
             rom_size_dsi: layout.rom_size_dsi,
             banner_size: banner.size,
             ds_rom_region_end,
