@@ -37,14 +37,34 @@ use crate::{
 /// The DS and DSi ROM region ends in the header are counted in these units.
 const DSI_REGION_UNIT: u32 = 0x80000;
 
-/// Guesses the alignment a section was built with from its offset. Used for the DSi area, whose sections are laid out more
-/// coarsely than the DS area.
+/// Guesses the alignment a section was built to from the trailing zeros of its offset, clamped to the 4-byte..4KB range the
+/// DSi mastering tools use. Used for the DSi area, whose sections are laid out more coarsely than the DS area.
+///
+/// This is a heuristic: an offset can carry more trailing zeros than its true alignment demands, so a section aligned to,
+/// say, 0x80000 whose offset happens to have only 12 trailing zeros is recorded as 0x1000-aligned. That still rebuilds an
+/// unmodified ROM byte for byte, because the section lands at the exact same offset either way; it only diverges from the
+/// original layout once a preceding section changes size, which would push a coarser-aligned section further along than the
+/// inferred alignment does. The header does not store the real alignment, so this is the best it can be inferred from.
 fn detect_alignment(offset: u32) -> u32 {
     if offset == 0 {
         4
     } else {
         1 << offset.trailing_zeros().clamp(2, 12)
     }
+}
+
+/// Writes `count` copies of `byte` to `cursor`, in fixed-size chunks so that padding a multi-megabyte gap doesn't allocate a
+/// temporary buffer the size of the gap.
+fn write_padding(cursor: &mut Cursor<Vec<u8>>, byte: u8, count: usize) -> io::Result<()> {
+    const CHUNK: usize = 8 * 1024;
+    let chunk = [byte; CHUNK];
+    let mut remaining = count;
+    while remaining > 0 {
+        let n = remaining.min(CHUNK);
+        cursor.write_all(&chunk[..n])?;
+        remaining -= n;
+    }
+    Ok(())
 }
 
 /// Rounds `value` up to the next multiple of `alignment`, which must be a power of two.
@@ -171,6 +191,15 @@ pub enum RomExtractError {
         end: usize,
         /// Size of the ROM.
         rom_size: usize,
+        /// Backtrace to the source of the error.
+        backtrace: Backtrace,
+    },
+    /// Occurs when a DSi header offset that should point into the ROM is zero, so the padding byte in front of it cannot be
+    /// read.
+    #[snafu(display("DSi header offset {field} is zero but must point into the ROM:\n{backtrace}"))]
+    DsiAreaOffsetZero {
+        /// Name of the offending offset.
+        field: &'static str,
         /// Backtrace to the source of the error.
         backtrace: Backtrace,
     },
@@ -1018,6 +1047,21 @@ impl<'a> Rom<'a> {
             return DsiAreaOutOfBoundsSnafu { end: end_of_dsi_area, rom_size: data.len() }.fail();
         }
 
+        // Each padding byte captured below is the value immediately before a section starts, read as `data[offset - 1]`. A
+        // zero offset would underflow that subtraction, so reject it as a malformed header rather than panic.
+        for (field, offset) in [
+            ("digest_sector_hashtable", header.digest_sector_hashtable.offset as usize),
+            ("digest_block_hashtable", header.digest_block_hashtable.offset as usize),
+            ("rom_size_ds", header.rom_size_ds as usize),
+            ("dsi_region", region_start),
+            ("arm7i", header.arm7i.offset as usize),
+            ("rom_size_dsi", header.rom_size_dsi as usize),
+        ] {
+            if offset == 0 {
+                return DsiAreaOffsetZeroSnafu { field }.fail();
+            }
+        }
+
         let modcrypt = if header.dsi_flags.modcrypted() {
             if header.dsi_flags.modcrypt_debug_key() {
                 log::warn!("ROM is Modcrypted with the debug key, which is not supported; DSi programs stay encrypted");
@@ -1316,10 +1360,10 @@ impl<'a> Rom<'a> {
 
         // --------------------- Reserve the digest tables ---------------------
         // Their contents cover the DSi area written below, so they get filled in afterwards.
-        cursor.write_all(&vec![0u8; layout.sector_hashtable_size as usize])?;
+        write_padding(cursor, 0, layout.sector_hashtable_size as usize)?;
         self.align(cursor, config.alignment.digest_block_hashtable, config.padding.digest_block_hashtable)?;
         assert_eq!(cursor.position() as u32, layout.block_hashtable_offset, "digest block hashtable landed off-layout");
-        cursor.write_all(&vec![0u8; layout.block_hashtable_size as usize])?;
+        write_padding(cursor, 0, layout.block_hashtable_size as usize)?;
         self.align(cursor, config.alignment.rom_size_ds, config.padding.rom_size_ds)?;
         assert_eq!(cursor.position() as u32, layout.rom_size_ds, "DS area ended off-layout");
         context.rom_size = Some(layout.rom_size_ds);
@@ -1328,7 +1372,7 @@ impl<'a> Rom<'a> {
         // The DSi-exclusive programs go in decrypted, so that the digest below sees them the way the DSi does. Modcrypt is
         // applied afterwards.
         let region_gap = layout.region_start - cursor.position() as u32;
-        cursor.write_all(&vec![config.padding.dsi_region; region_gap as usize])?;
+        write_padding(cursor, config.padding.dsi_region, region_gap as usize)?;
         cursor.write_all(&dsi.region_padding)?;
         assert_eq!(cursor.position() as u32, layout.arm9i_offset, "ARM9i landed off-layout");
         cursor.write_all(dsi.arm9i.full_data())?;
@@ -1336,7 +1380,7 @@ impl<'a> Rom<'a> {
         assert_eq!(cursor.position() as u32, layout.arm7i_offset, "ARM7i landed off-layout");
         cursor.write_all(dsi.arm7i.full_data())?;
         let dsi_gap = layout.rom_size_dsi - cursor.position() as u32;
-        cursor.write_all(&vec![config.padding.rom_size_dsi; dsi_gap as usize])?;
+        write_padding(cursor, config.padding.rom_size_dsi, dsi_gap as usize)?;
 
         // --------------------- Content SHA1-HMACs ---------------------
         // The ARM9 hashes cover the secure area encrypted, which is not how every dump stores it.

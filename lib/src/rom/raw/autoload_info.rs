@@ -126,6 +126,22 @@ pub enum RawAutoloadInfoError {
         /// Backtrace to the source of the error.
         backtrace: Backtrace,
     },
+    /// Occurs when more than one layout parses plausibly and the autoload blocks don't tell them apart, so picking one would
+    /// risk silently misparsing the list.
+    #[snafu(display(
+        "autoload infos of {size} bytes are ambiguous: they parse plausibly in {count} layouts but no layout's code sizes \
+         add up to {expected_blocks_size:#x} bytes of autoload blocks, so the layout cannot be determined:\n{backtrace}"
+    ))]
+    AmbiguousLayout {
+        /// Size of the input.
+        size: usize,
+        /// Number of layouts that parsed plausibly.
+        count: usize,
+        /// Combined size of the autoload blocks, which the entries' code sizes should add up to.
+        expected_blocks_size: u32,
+        /// Backtrace to the source of the error.
+        backtrace: Backtrace,
+    },
 }
 
 impl AutoloadInfoEntry {
@@ -156,15 +172,20 @@ impl AutoloadInfoEntry {
         }
 
         // No layout matches the size of the autoload blocks, which can happen if the blocks aren't packed the way we expect.
-        // Fall back to the first layout that isn't obviously nonsense.
-        if let Some((layout, entries)) = candidates.iter().find(|(_, entries)| entries.iter().all(Self::is_plausible)) {
-            log::warn!(
-                "Autoload block sizes don't add up to {blocks_size:#x} bytes in any layout, assuming the {layout} layout"
-            );
-            return Ok(entries.clone());
+        // Fall back to a plausible layout, but only if exactly one is plausible: when several are (e.g. a 48-byte list that
+        // divides into both three extended and four basic entries), guessing between them risks silently misparsing the
+        // list, so treat that as ambiguous instead.
+        let plausible = candidates.iter().filter(|(_, entries)| entries.iter().all(Self::is_plausible)).collect::<Vec<_>>();
+        match plausible.as_slice() {
+            [(layout, entries)] => {
+                log::warn!(
+                    "Autoload block sizes don't add up to {blocks_size:#x} bytes in any layout, assuming the {layout} layout"
+                );
+                Ok(entries.clone())
+            }
+            [] => NoMatchingLayoutSnafu { size: data.len(), expected_blocks_size: blocks_size }.fail(),
+            _ => AmbiguousLayoutSnafu { size: data.len(), count: plausible.len(), expected_blocks_size: blocks_size }.fail(),
         }
-
-        NoMatchingLayoutSnafu { size: data.len(), expected_blocks_size: blocks_size }.fail()
     }
 
     fn parse_list_with_layout(data: &'_ [u8], layout: AutoloadInfoLayout) -> Vec<Self> {
