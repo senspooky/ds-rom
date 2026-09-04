@@ -392,4 +392,25 @@ mod tests {
         let error = AutoloadInfoEntry::parse_list(&EXTENDED[..20], 0x1480).unwrap_err();
         assert!(matches!(error, RawAutoloadInfoError::InvalidSize { .. }));
     }
+
+    /// When no layout's code sizes add up to the autoload blocks but exactly one layout parses plausibly, that layout is
+    /// used as a fallback. The 64-byte extended list only divides into extended entries, so a mismatched block size still
+    /// resolves to the same entries as the matching one.
+    #[test]
+    fn falls_back_to_the_only_plausible_layout() {
+        let matched = AutoloadInfoEntry::parse_list(&EXTENDED, 0x1480).unwrap();
+        let fallback = AutoloadInfoEntry::parse_list(&EXTENDED, 0x9999).unwrap();
+        assert_eq!(fallback.len(), 4);
+        assert_eq!(fallback, matched);
+    }
+
+    /// A lone candidate layout that parses to an implausible entry and whose code sizes don't add up is rejected outright
+    /// rather than used as a fallback.
+    #[test]
+    fn rejects_the_only_layout_when_implausible() {
+        // 12 bytes divide only into a single basic entry, whose zero base address is below the 0x01000000 floor, so it is
+        // not a plausible module and there is nothing to fall back to.
+        let error = AutoloadInfoEntry::parse_list(&[0u8; 12], 0x100).unwrap_err();
+        assert!(matches!(error, RawAutoloadInfoError::NoMatchingLayout { .. }));
+    }
 }
