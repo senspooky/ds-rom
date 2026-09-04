@@ -1698,3 +1698,22 @@ impl Default for RomLoadOptions<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A zeroed DSi header puts every section offset at zero. Extraction has to reject that with a clean error rather than
+    /// underflow the `data[offset - 1]` padding-byte reads and panic, so a crafted ROM cannot crash the extractor.
+    #[test]
+    fn rejects_zero_dsi_offsets() {
+        // The header parser needs at least the 0x4000-byte header/secure-area region before it will hand back a header.
+        let rom = raw::Rom::new(vec![0u8; 0x4000]);
+        let header = rom.header().expect("a header-sized buffer parses as a header");
+        match Rom::extract_dsi_area(&rom, header) {
+            Err(RomExtractError::DsiAreaOffsetZero { field: "digest_sector_hashtable", .. }) => {}
+            Err(other) => panic!("expected a zero-offset error, got {other:?}"),
+            Ok(_) => panic!("expected extraction of a zeroed header to fail"),
+        }
+    }
+}
