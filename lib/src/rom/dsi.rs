@@ -52,16 +52,6 @@ impl<'a> DsiProgram<'a> {
         modcrypt.apply(counter, &mut self.data.to_mut()[..size]);
     }
 
-    /// Returns a copy of this program as it is stored in the ROM, with its Modcrypt area encrypted.
-    pub fn encrypted(&self, modcrypt: &Modcrypt, counter: [u8; 16]) -> Cow<'_, [u8]> {
-        if self.offsets.modcrypt_size == 0 {
-            return Cow::Borrowed(self.data.as_ref());
-        }
-        let mut encrypted = self.clone();
-        encrypted.apply_modcrypt(modcrypt, counter);
-        Cow::Owned(encrypted.data.into_owned())
-    }
-
     /// Returns whether this program is Modcrypted in the ROM.
     pub fn is_modcrypted(&self) -> bool {
         self.offsets.modcrypt_size != 0
